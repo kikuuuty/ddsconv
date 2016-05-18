@@ -1,6 +1,6 @@
 # ispc_texcomp
 
-ISPC Texture Compressorのコマンドラインツールです。  
+[ISPC Texture Compressor](https://github.com/GameTechDev/ISPCTextureCompressor)のコマンドラインツールです。  
 圧縮フォーマットはBC1,BC3,BC6H,BC7のみで、ETCとASTCには対応していません。  
 
 ## 使い方
