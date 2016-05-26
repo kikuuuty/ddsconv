@@ -64,6 +64,12 @@ const wchar_t* levels[] = {
     _T("veryslow"),
 };
 
+bool is_block_align( Format fmt, size_t width, size_t height )
+{
+    size_t block_align = fmt == Format::BC1 ? 4 : 8;
+    return ISALIGN(width, block_align) /*&& ISALIGN(height, block_align)*/;
+}
+
 size_t get_memory_size( uint32_t width, uint32_t height, Format format )
 {
     switch ( format ) {
@@ -217,8 +223,6 @@ std::shared_ptr<Spec> init_spec_from( const CommandLineOptions& options )
 
 bool compress_and_save( const std::shared_ptr<Spec> spec )
 {
-    printf( _T("compress and save\n") );
-
     HRESULT hr;
 
     hr = ::CoInitializeEx( NULL, COINIT_MULTITHREADED );
@@ -238,7 +242,7 @@ bool compress_and_save( const std::shared_ptr<Spec> spec )
         }
     }
 
-    if ( ((spec->format == Format::BC1) && (!ISALIGN(meta.width, 4) || !ISALIGN(meta.height, 4)) || (!ISALIGN(meta.width, 8) || !ISALIGN(meta.height, 8))) ) {
+    if ( !is_block_align( spec->format, meta.width, meta.height ) ) {
         printf( _T("  Input width and height need to be a multiple of block size.\n") );
         printf( _T("  4 bytes/block for BC1/ETC1, 8 bytes/block for BC3/BC6H/BC7/ASTC,\n") );
         printf( _T("  the blocks are stored in raster scan order (natural CPU texture layout).") );

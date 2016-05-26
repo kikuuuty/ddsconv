@@ -32,7 +32,7 @@ wchar_t* set_locale( const wchar_t* locale )
     auto temp = _wsetlocale( LC_CTYPE, nullptr );
     auto length = wcslen( temp );
     auto prev_locale = new wchar_t[length + 1];
-    memcpy( prev_locale, temp, sizeof(decltype(prev_locale)) * length );
+    memcpy( prev_locale, temp, sizeof(wchar_t) * length );
     prev_locale[length] = 0;
     _wsetlocale( LC_CTYPE, locale );
     return prev_locale;
@@ -92,6 +92,7 @@ size_t printf( const wchar_t* fmt, ... )
     length = wprintf( L"%s", s );
 
     _wsetlocale( LC_CTYPE, prev_locale );
+
     delete [] prev_locale;
 
     delete [] s;
