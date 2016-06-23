@@ -31,7 +31,6 @@
    SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
 */
 
-#include "stdafx.h"
 #include "ispc_texcomp.h"
 #include "kernel_ispc.h"
 #include "memory.h" // memcpy

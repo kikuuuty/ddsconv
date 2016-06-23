@@ -9,9 +9,9 @@ void show_usage();
 
 struct Spec;
 
-std::shared_ptr<Spec> init_spec_from( const CommandLineOptions& options );
+std::shared_ptr<Spec> init_spec_from(const CommandLineOptions& options);
 
-bool compress_and_save( const std::shared_ptr<Spec> spec );
+bool compress_and_save(const std::shared_ptr<Spec> spec);
 
 }
 
