@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClInclude Include="stdafx.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="option_perser.h" />
+    <ClInclude Include="processing.h" />
+    <ClInclude Include="ispc_texcomp.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="stdafx.cpp" />
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="option_perser.cpp" />
+    <ClCompile Include="processing.cpp" />
+    <ClCompile Include="ispc_texcomp.cpp" />
+    <ClCompile Include="ispc_texcomp_astc.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="kernel.ispc" />
+    <CustomBuild Include="kernel_astc.ispc" />
+  </ItemGroup>
+</Project>
