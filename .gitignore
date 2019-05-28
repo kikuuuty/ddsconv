@@ -349,4 +349,4 @@ healthchecksdb
 MigrationBackup/
 
 # for ispc
-*ispc*.h
+kernel*ispc*.h
