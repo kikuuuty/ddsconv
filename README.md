@@ -15,9 +15,11 @@ Windows向けのバイナリをダウンロードして、次のディレクト�
 DirectXTexをddsconvと同じディレクトリにクローンする必要があります。  
 https://github.com/microsoft/DirectXTex
 
-- your-project-dirs
-  - ddsconv
-  - DirectXTex
+```
++-- your-project-dirs/
+    +-- ddsconv/
+    +-- DirectXTex/
+```
 
 ## 使い方
 詳しい使い方は、-hまたは--helpオプションを参照してください。  
