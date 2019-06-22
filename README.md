@@ -8,9 +8,13 @@ BC1/3およびBC6H/BC7の圧縮には[ISPC Texture Compressor](https://github.co
 ISPCのバイナリを別途ダウンロードする必要があります。  
 https://ispc.github.io/downloads.html
 
-Windows向けのバイナリをダウンロードして、次のディレクトリに配置してください。  
+Windows向けのバイナリをダウンロードして、次のディレクトリにispc.exeを配置してください。  
 
-- ISPC/win/ispc.exe
+```
++-- ddsconv/
+    +-- ISPC/win/
+        +-- ispc.exe
+```
 
 DirectXTexをddsconvと同じディレクトリにクローンする必要があります。  
 https://github.com/microsoft/DirectXTex
