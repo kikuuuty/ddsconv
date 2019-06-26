@@ -13,13 +13,15 @@
 
 #include "DirectXTex.h"
 #include "ispc_texcomp.h"
+#include "image.h"
 
-#define VERSION "1.0.0"
+#define VERSION "1.0.1"
 
 #define ABORT(msg) { puts(msg); return 1; }
 #define ARG_CASE(s) if (kv.first == s)
 #define ARG_CASE2(s1, s2) if (kv.first == s1 || kv.first == s2)
 #define CHECK_NUM_ARGS(p) if (kv.second.size() < p) continue;
+#define ROUNDUP(x,n) ((((x)+(n)-1)/(n))*(n))
 
 namespace
 {
@@ -55,7 +57,7 @@ namespace
             "\t元画像を含むミップマップレベルを指定します。\n"
             "\t0を指定した場合は1x1までのミップマップを出力します。\n"
         "  -o, --output <filename>\n"
-            "\t出力ファイルパスを指定します。初期値は\"<input>.dds\"です。\n"
+            "\t出力ファイルパスを指定します。初期値は\"output.dds\"です。\n"
         "  -s, --srgb\n"
             "\t入力をsRGB色空間、出力をリニア色空間として処理します。\n"
         "  --forceRgb\n"
@@ -81,7 +83,7 @@ namespace
     struct Spec
     {
         std::wstring source;
-        std::wstring output;
+        std::wstring output = L"output.dds";
         DXGI_FORMAT format = DXGI_FORMAT_BC7_UNORM;
         Level::Type level = Level::UltraFast;
         uint32_t mipLevels = 0;
@@ -207,12 +209,9 @@ namespace
         }
         if (!inputSpecified) ABORT("No input source specified! Use --input <filename/folder>, or see --help");
         if (!outputSpecified) {
-            auto i = spec.source.find_first_of('.');
-            if (i == std::string::npos) {
-                spec.output = spec.source + L".dds";
-            }
-            else {
-                spec.output = spec.source.substr(0, i) + L".dds";
+            auto i = spec.source.find_last_of('/');
+            if (i != std::string::npos) {
+                spec.output = spec.source.substr(0, i) + spec.output;
             }
         }
         return 0;
@@ -222,28 +221,39 @@ namespace
     {
         auto images = std::make_unique<DirectX::ScratchImage>();
         DirectX::TexMetadata meta;
-        HRESULT hr = DirectX::LoadFromTGAFile(filename.c_str(), &meta, *images);
-        if (FAILED(hr)) {
-            hr = DirectX::LoadFromWICFile(filename.c_str(), DirectX::WIC_FLAGS_NONE, &meta, *images);
-            if (FAILED(hr))
-                return nullptr;
+        if (FAILED(DirectX::LoadFromDDSFile(filename.c_str(), DirectX::DDS_FLAGS_NONE, &meta, *images))) {
+            if (FAILED(DirectX::LoadFromTGAFile(filename.c_str(), &meta, *images))) {
+                if (FAILED(DirectX::LoadFromWICFile(filename.c_str(), DirectX::WIC_FLAGS_NONE, &meta, *images))) {
+                    return nullptr;
+                }
+            }
         }
         return images;
     }
 
     bool shouldConvertImage(const Spec& spec, const DirectX::TexMetadata& meta)
     {
-        return spec.srgbSpecified || meta.format != DXGI_FORMAT_R8G8B8A8_UNORM;
+        if (spec.srgbSpecified)
+            return true;
+        if (spec.format != DXGI_FORMAT_BC6H_UF16) {
+            if (meta.format != DXGI_FORMAT_R8G8B8A8_UNORM)
+                return true;
+        }
+        else {
+            if (meta.format != DXGI_FORMAT_R16G16B16A16_FLOAT)
+                return true;
+        }
+        return false;
     }
 
-    std::unique_ptr<DirectX::ScratchImage> convertImage(std::unique_ptr<DirectX::ScratchImage> images, bool srgbSpecified)
+    std::unique_ptr<DirectX::ScratchImage> convertImage(const Spec& spec, std::unique_ptr<DirectX::ScratchImage> images)
     {
         uint32_t filter = DirectX::TEX_FILTER_DEFAULT;
-        if (srgbSpecified)
-            filter |= DirectX::TEX_FILTER_SRGB_IN;
+        if (spec.srgbSpecified) filter |= DirectX::TEX_FILTER_SRGB_IN;
+        DXGI_FORMAT format = spec.format != DXGI_FORMAT_BC6H_UF16 ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
         auto result = std::make_unique<DirectX::ScratchImage>();
         HRESULT hr = DirectX::Convert(images->GetImages(), images->GetImageCount(), images->GetMetadata(),
-                                      DXGI_FORMAT_R8G8B8A8_UNORM, filter, DirectX::TEX_THRESHOLD_DEFAULT, *result);
+                                      format, filter, DirectX::TEX_THRESHOLD_DEFAULT, *result);
         if (FAILED(hr))
             return nullptr;
         return result;
@@ -253,33 +263,37 @@ namespace
     {
         auto& meta = images->GetMetadata();
         auto mipChain = std::make_unique<DirectX::ScratchImage>();
-        if (meta.dimension != DirectX::TEX_DIMENSION_TEXTURE3D) {
-            if (FAILED(DirectX::GenerateMipMaps(images->GetImages(), images->GetImageCount(), meta, DirectX::TEX_FILTER_DEFAULT, mipLevels, *mipChain))) {
+        if (meta.dimension == DirectX::TEX_DIMENSION_TEXTURE3D) {
+            if (FAILED(DirectX::GenerateMipMaps3D(images->GetImages(), images->GetImageCount(), meta, DirectX::TEX_FILTER_DEFAULT, mipLevels, *mipChain))) {
                 return nullptr;
             }
         }
         else {
-            if (FAILED(DirectX::GenerateMipMaps3D(images->GetImages(), images->GetImageCount(), meta, DirectX::TEX_FILTER_DEFAULT, mipLevels, *mipChain))) {
+            if (FAILED(DirectX::GenerateMipMaps(images->GetImages(), images->GetImageCount(), meta, DirectX::TEX_FILTER_DEFAULT, mipLevels, *mipChain))) {
                 return nullptr;
             }
         }
         return mipChain;
     }
 
-    size_t computeImageSize(DXGI_FORMAT format, size_t width, size_t height)
+    std::unique_ptr<DirectX::ScratchImage> createNewImage(DXGI_FORMAT format, const DirectX::TexMetadata& meta)
     {
-        switch (format) {
-        case DXGI_FORMAT_BC1_UNORM:
-            return (((width + 3) / 4) * ((height + 3) / 4)) * 8;
-        case DXGI_FORMAT_BC3_UNORM:
-            return (((width + 3) / 4) * ((height + 3) / 4)) * 16;
-        case DXGI_FORMAT_BC6H_UF16:
-        case DXGI_FORMAT_BC7_UNORM:
-            return (((width + 3) / 4) * ((height + 3) / 4)) * 16;
-        default:
-            break;
+        auto newImages = std::make_unique<DirectX::ScratchImage>();
+        if (meta.dimension == DirectX::TEX_DIMENSION_TEXTURE1D) {
+            newImages->Initialize1D(format, meta.width, meta.arraySize, meta.mipLevels);
         }
-        return 0;
+        else if (meta.dimension == DirectX::TEX_DIMENSION_TEXTURE2D) {
+            if (meta.miscFlags & DirectX::TEX_MISC_TEXTURECUBE) {
+                newImages->InitializeCube(format, meta.width, meta.height, meta.arraySize / 6, meta.mipLevels);
+            }
+            else {
+                newImages->Initialize2D(format, meta.width, meta.height, meta.arraySize, meta.mipLevels);
+            }
+        }
+        else if (meta.dimension == DirectX::TEX_DIMENSION_TEXTURE3D) {
+            newImages->Initialize3D(format, meta.width, meta.height, meta.depth, meta.mipLevels);
+        }
+        return newImages;
     }
 
     void initBC6HProfile(bc6h_enc_settings* settings, Level::Type level)
@@ -327,50 +341,65 @@ namespace
     std::unique_ptr<DirectX::ScratchImage> compressImages(std::unique_ptr<DirectX::ScratchImage> images, const Spec& spec)
     {
         auto& meta = images->GetMetadata();
-        auto newImages = std::make_unique<DirectX::ScratchImage>();
-        newImages->Initialize2D(spec.format, meta.width, meta.height, meta.arraySize, meta.mipLevels);
+        auto newImages = createNewImage(spec.format, meta);
 
-        size_t bufferSize = computeImageSize(spec.format, meta.width, meta.height);
-        DirectX::Blob blob;
-        blob.Initialize(bufferSize);
+        util::Image image;
 
-        for (uint32_t mip = 0; mip < meta.mipLevels; ++mip) {
-            auto src = images->GetImage(mip, 0, 0);
-            auto dst = newImages->GetImage(mip, 0, 0);
+        for (size_t mip = 0; mip < meta.mipLevels; ++mip) {
+            for (size_t item = 0; item < meta.arraySize; ++item) {
+                for (size_t slice = 0; slice < meta.depth; ++slice) {
+                    auto src = images->GetImage(mip, item, slice);
+                    auto dst = newImages->GetImage(mip, item, slice);
 
-            rgba_surface surface;
-            surface.ptr = src->pixels;
-            surface.width = (int32_t)src->width;
-            surface.height = (int32_t)src->height;
-            surface.stride = (int32_t)src->rowPitch;
+                    rgba_surface surface;
+                    if ((src->width & 3) == 0 && (src->height & 3) == 0) {
+                        surface.ptr = src->pixels;
+                        surface.width = (int32_t)src->width;
+                        surface.height = (int32_t)src->height;
+                        surface.stride = (int32_t)src->rowPitch;
+                    }
+                    else {
+                        int32_t w = (int32_t)ROUNDUP(src->width, 4);
+                        int32_t h = (int32_t)ROUNDUP(src->height, 4);
+                        int32_t bpp = (int32_t)DirectX::BitsPerPixel(src->format);
+                        int32_t stride = (bpp >> 3) * w;
+                        image = util::Image(w, h, stride, bpp);
 
-            switch (spec.format) {
-            case DXGI_FORMAT_BC1_UNORM:
-                CompressBlocksBC1(&surface, (uint8_t*)blob.GetBufferPointer());
-                break;
-            case DXGI_FORMAT_BC3_UNORM:
-                CompressBlocksBC3(&surface, (uint8_t*)blob.GetBufferPointer());
-                break;
-            case DXGI_FORMAT_BC6H_UF16:
-                {
-                    bc6h_enc_settings settings;
-                    initBC6HProfile(&settings, spec.level);
-                    CompressBlocksBC6H(&surface, (uint8_t*)blob.GetBufferPointer(), &settings);
+                        util::Image temp;
+                        temp.set(src->pixels, src->width, src->height, src->rowPitch, bpp);
+                        image.copy(temp);
+
+                        surface.ptr = (uint8_t*)image.getData();
+                        surface.width = (int32_t)image.getWidth();
+                        surface.height = (int32_t)image.getHeight();
+                        surface.stride = (int32_t)image.getBytesPerRow();
+                    }
+
+                    switch (spec.format) {
+                    case DXGI_FORMAT_BC1_UNORM:
+                        CompressBlocksBC1(&surface, dst->pixels);
+                        break;
+                    case DXGI_FORMAT_BC3_UNORM:
+                        CompressBlocksBC3(&surface, dst->pixels);
+                        break;
+                    case DXGI_FORMAT_BC6H_UF16:
+                        {
+                            bc6h_enc_settings settings;
+                            initBC6HProfile(&settings, spec.level);
+                            CompressBlocksBC6H(&surface, dst->pixels, &settings);
+                        }
+                        break;
+                    case DXGI_FORMAT_BC7_UNORM:
+                        {
+                            bc7_enc_settings settings;
+                            initBC7Profile(&settings, spec.level, spec.forceRgbSpecified);
+                            CompressBlocksBC7(&surface, dst->pixels, &settings);
+                        }
+                        break;
+                    }
                 }
-                break;
-            case DXGI_FORMAT_BC7_UNORM:
-                {
-                    bc7_enc_settings settings;
-                    initBC7Profile(&settings, spec.level, spec.forceRgbSpecified);
-                    CompressBlocksBC7(&surface, (uint8_t*)blob.GetBufferPointer(), &settings);
-                }
-                break;
             }
-
-            bufferSize = computeImageSize(spec.format, surface.width, surface.height);
-            memcpy(dst->pixels, blob.GetBufferPointer(), bufferSize);
         }
-
         return newImages;
     }
 
@@ -402,7 +431,7 @@ int main(int argc, char* argv[])
 
     if (shouldConvertImage(spec, images->GetMetadata()))
     {
-        images = convertImage(std::move(images), spec.srgbSpecified);
+        images = convertImage(spec, std::move(images));
         if (!images)
             ABORT("DirectX::Convert failed.");
     }
