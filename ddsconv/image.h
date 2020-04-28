@@ -5,42 +5,42 @@
 
 #include <memory>
 
-namespace util
-{
-    class Image
-    {
-    public:
-        Image();
-        Image(size_t w, size_t h, size_t stride, size_t bitsPerPixel);
+namespace util {
 
-        void reset();
+class Image {
+public:
+    Image() noexcept = default;
+    Image(size_t w, size_t h, size_t stride, size_t bitsPerPixel);
 
-        void set(void* data, size_t w, size_t h, size_t stride, size_t bitsPerPixel);
+    void reset();
 
-        void copy(Image const& src);
+    void set(void* data, size_t w, size_t h, size_t stride, size_t bitsPerPixel);
 
-        bool isValid() const { return mData != nullptr; }
+    void copy(Image const& src) noexcept;
 
-        size_t getWidth() const { return mWidth; }
+    bool isValid() const noexcept { return mData != nullptr; }
 
-        size_t getHeight() const { return mHeight; }
+    size_t getWidth() const noexcept { return mWidth; }
 
-        size_t getBytesPerRow() const { return mBpr; }
+    size_t getHeight() const noexcept { return mHeight; }
 
-        size_t getBytesPerPixel() const { return mBpp; }
+    size_t getBytesPerRow() const noexcept { return mBpr; }
 
-        void* getData() const { return mData; }
+    size_t getBytesPerPixel() const noexcept { return mBpp; }
 
-        void* getPixelRef(size_t x, size_t y) const { return static_cast<uint8_t*>(mData) + y * getBytesPerRow() + x * getBytesPerPixel(); }
+    void* getData() const noexcept { return mData; }
 
-    private:
-        size_t mWidth;
-        size_t mHeight;
-        size_t mBpr;
-        size_t mBpp;
-        std::unique_ptr<uint8_t[]> mOwnedData;
-        void* mData;
-    };
+    void* getPixelRef(size_t x, size_t y) const noexcept { return static_cast<uint8_t*>(mData) + y * getBytesPerRow() + x * getBytesPerPixel(); }
+
+private:
+    size_t mWidth = 0;
+    size_t mHeight = 0;
+    size_t mBpr = 0;
+    size_t mBpp = 0;
+    std::unique_ptr<uint8_t[]> mOwnedData;
+    void* mData = nullptr;
+};
+
 }
 
 #endif
