@@ -15,7 +15,7 @@
 #include "ispc_texcomp.h"
 #include "image.h"
 
-#define VERSION "1.0.1"
+#define VERSION "1.1.0"
 
 #define ABORT(msg) { puts(msg); return 1; }
 #define ARG_CASE(s) if (kv.first == s)
@@ -45,7 +45,14 @@ const char helpText[] =
         "\tbc7  - RGB画像、またはRGBA画像(多階調アルファ)。DX10以降。\n"
     "  -h, --help\n"
         "\tこれを表示します。\n"
-    "  -l, --level <level>\n"
+    "  -l, --linearColorSpace\n"
+        "\tsRGBカラー空間からリニアカラー空間へ変換します。\n"
+    "  -m, --miplevels <levels>\n"
+        "\t元画像を含むミップマップレベルを指定します。\n"
+        "\t0を指定した場合は1x1までのミップマップを出力します。\n"
+    "  -o, --output <filename>\n"
+        "\t出力ファイルパスを指定します。初期値は\"output.dds\"です。\n"
+    "  -q, --quality <level>\n"
         "\tBC7/BC6Hの圧縮速度と品質を指定します。初期値は\"ultrafast\"です。\n"
         "\tultrafast - 最高速度。\n"
         "\tveryfast  - 非常に高速。\n"
@@ -53,13 +60,6 @@ const char helpText[] =
         "\tbasic     - 中間。\n"
         "\tslow      - 高品質。\n"
         "\tveryslow  - 最高品質。\n"
-    "  -m, --miplevels <levels>\n"
-        "\t元画像を含むミップマップレベルを指定します。\n"
-        "\t0を指定した場合は1x1までのミップマップを出力します。\n"
-    "  -o, --output <filename>\n"
-        "\t出力ファイルパスを指定します。初期値は\"output.dds\"です。\n"
-    "  -s, --srgb\n"
-        "\t入力をsRGB色空間、出力をリニア色空間として処理します。\n"
     "  --forceRgb\n"
         "\tBC7の圧縮時にアルファチャンネルを無視します。\n"
         "\tわずかに圧縮速度が向上しますが、サイズには影響しません。\n"
@@ -86,7 +86,7 @@ struct Spec {
     uint32_t mipLevels = 0;
     bool forceRgbSpecified = false;
     bool mipmapSpecified = false;
-    bool srgbSpecified = false;
+    bool linearColorSpecified = false;
     bool verboseSpecified = false;
 };
 
@@ -161,15 +161,8 @@ int parseArguments(Spec& spec, int argc, char* argv[]) {
             spec.source = utf8ToUtf16(kv.second[0]);
             continue;
         }
-        ARG_CASE2("-l", "--level") {
-            CHECK_NUM_ARGS(1);
-            auto level = kv.second[0];
-            if (level == "ultrafast") spec.level = Level::ULTRA_FAST;
-            if (level == "veryfast")  spec.level = Level::VERY_FAST;
-            if (level == "fast")      spec.level = Level::FAST;
-            if (level == "basic")     spec.level = Level::BASIC;
-            if (level == "slow")      spec.level = Level::SLOW;
-            if (level == "veryslow")  spec.level = Level::VERY_SLOW;
+        ARG_CASE2("-l", "--linearColorSpace") {
+            spec.linearColorSpecified = true;
             continue;
         }
         ARG_CASE2("-m", "--mipLevels") {
@@ -184,8 +177,15 @@ int parseArguments(Spec& spec, int argc, char* argv[]) {
             spec.output = utf8ToUtf16(kv.second[0]);
             continue;
         }
-        ARG_CASE2("-s", "--srgb") {
-            spec.srgbSpecified = true;
+        ARG_CASE2("-q", "--quality") {
+            CHECK_NUM_ARGS(1);
+            auto level = kv.second[0];
+            if (level == "ultrafast") spec.level = Level::ULTRA_FAST;
+            if (level == "veryfast")  spec.level = Level::VERY_FAST;
+            if (level == "fast")      spec.level = Level::FAST;
+            if (level == "basic")     spec.level = Level::BASIC;
+            if (level == "slow")      spec.level = Level::SLOW;
+            if (level == "veryslow")  spec.level = Level::VERY_SLOW;
             continue;
         }
         ARG_CASE2("--forceRgb", "--forcergb") {
@@ -210,37 +210,45 @@ int parseArguments(Spec& spec, int argc, char* argv[]) {
     return 0;
 }
 
-std::unique_ptr<DirectX::ScratchImage> loadImageFromFile(const std::wstring& filename) {
+DXGI_FORMAT getTargetFormat(const Spec& spec) {
+    return spec.format != DXGI_FORMAT_BC6H_UF16 ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
+}
+
+bool shouldConvertImage(const Spec& spec, const DirectX::TexMetadata& meta) {
+    return getTargetFormat(spec) != meta.format;
+}
+
+std::unique_ptr<DirectX::ScratchImage> loadImageFromFile(const Spec& spec) {
     auto images = std::make_unique<DirectX::ScratchImage>();
     DirectX::TexMetadata meta;
-    if (FAILED(DirectX::LoadFromDDSFile(filename.c_str(), DirectX::DDS_FLAGS_NONE, &meta, *images))) {
-        if (FAILED(DirectX::LoadFromTGAFile(filename.c_str(), &meta, *images))) {
-            if (FAILED(DirectX::LoadFromWICFile(filename.c_str(), DirectX::WIC_FLAGS_NONE, &meta, *images))) {
+    if (FAILED(DirectX::LoadFromDDSFile(spec.source.c_str(), DirectX::DDS_FLAGS_NONE, &meta, *images))) {
+        if (FAILED(DirectX::LoadFromTGAFile(spec.source.c_str(), &meta, *images))) {
+            if (FAILED(DirectX::LoadFromWICFile(spec.source.c_str(), DirectX::WIC_FLAGS_NONE, &meta, *images))) {
                 return nullptr;
             }
         }
     }
+
+    // リニアカラー変換を指定されているが、画像のコンバートが必要ない場合。
+    // DirectX::Convertは元のフォーマットと変換後のフォーマットが同じ場合は失敗を返す。
+    // 色空間の変換のみを行うために、一度別のフォーマットに変更しておく。
+    if (spec.linearColorSpecified && !shouldConvertImage(spec, meta)) {
+        auto result = std::make_unique<DirectX::ScratchImage>();
+        if (FAILED(DirectX::Convert(images->GetImages(), images->GetImageCount(), images->GetMetadata(), DXGI_FORMAT_B8G8R8A8_UNORM, 
+                                    DirectX::TEX_FILTER_DEFAULT, DirectX::TEX_THRESHOLD_DEFAULT, *result))) {
+            return nullptr;
+        }
+        images = std::move(result);
+    }
     return images;
 }
 
-bool shouldConvertImage(const Spec& spec, const DirectX::TexMetadata& meta) {
-    if (spec.srgbSpecified)
-        return true;
-    if (spec.format != DXGI_FORMAT_BC6H_UF16) {
-        if (meta.format != DXGI_FORMAT_R8G8B8A8_UNORM)
-            return true;
-    }
-    else {
-        if (meta.format != DXGI_FORMAT_R16G16B16A16_FLOAT)
-            return true;
-    }
-    return false;
-}
-
 std::unique_ptr<DirectX::ScratchImage> convertImage(const Spec& spec, std::unique_ptr<DirectX::ScratchImage> images) {
+    DXGI_FORMAT format = getTargetFormat(spec);
     uint32_t filter = DirectX::TEX_FILTER_DEFAULT;
-    if (spec.srgbSpecified) filter |= DirectX::TEX_FILTER_SRGB_IN;
-    DXGI_FORMAT format = spec.format != DXGI_FORMAT_BC6H_UF16 ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_FLOAT;
+    if (spec.linearColorSpecified) {
+        filter |= DirectX::TEX_FILTER_SRGB_IN;
+    }
     auto result = std::make_unique<DirectX::ScratchImage>();
     HRESULT hr = DirectX::Convert(images->GetImages(), images->GetImageCount(), images->GetMetadata(),
                                   format, filter, DirectX::TEX_THRESHOLD_DEFAULT, *result);
@@ -409,7 +417,7 @@ int main(int argc, char* argv[]) {
     if (parseArguments(spec, argc, argv) != 0)
         return 1;
 
-    auto images = loadImageFromFile(spec.source);
+    auto images = loadImageFromFile(spec);
     if (!images)
         ABORT("DirectX::LoadFromXXXFile failed.");
 
