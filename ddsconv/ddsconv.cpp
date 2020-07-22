@@ -126,7 +126,7 @@ std::wstring utf8ToUtf16(const std::string& u8str) {
     int u16strLen = ::MultiByteToWideChar(CP_UTF8, 0, u8str.c_str(), -1, NULL, 0);
     if (u16strLen <= 0) return std::wstring();
     std::wstring u16str;
-    u16str.resize(u16strLen-1);
+    u16str.resize(static_cast<size_t>(u16strLen) - 1);
     ::MultiByteToWideChar(CP_UTF8, 0, u8str.c_str(), -1, &u16str[0], u16strLen);
     return u16str;
 }
@@ -135,7 +135,7 @@ std::string utf16ToUtf8(const std::wstring& u16str) {
     int u8strLen = ::WideCharToMultiByte(CP_UTF8, 0, u16str.c_str(), -1, NULL, 0, NULL, NULL);
     if (u8strLen <= 0) return std::string();
     std::string u8str;
-    u8str.resize(u8strLen - 1);
+    u8str.resize(static_cast<size_t>(u8strLen) - 1);
     ::WideCharToMultiByte(CP_UTF8, 0, u16str.c_str(), -1, &u8str[0], u8strLen, NULL, NULL);
     return u8str;
 }
@@ -144,7 +144,7 @@ int parseArguments(Spec& spec, int argc, char* argv[]) {
     auto options = parseOptions(argc, argv);
     bool inputSpecified = false;
     bool outputSpecified = false;
-    for (auto& kv : options) {
+    for (auto&& kv : options) {
         ARG_CASE2("-f", "--format") {
             CHECK_NUM_ARGS(1);
             auto format = kv.second[0];
@@ -369,26 +369,26 @@ std::unique_ptr<DirectX::ScratchImage> compressImages(std::unique_ptr<DirectX::S
                 }
 
                 switch (spec.format) {
-                case DXGI_FORMAT_BC1_UNORM:
+                  case DXGI_FORMAT_BC1_UNORM: {
                     CompressBlocksBC1(&surface, dst->pixels);
                     break;
-                case DXGI_FORMAT_BC3_UNORM:
+                  }
+                  case DXGI_FORMAT_BC3_UNORM: {
                     CompressBlocksBC3(&surface, dst->pixels);
                     break;
-                case DXGI_FORMAT_BC6H_UF16:
-                    {
-                        bc6h_enc_settings settings;
-                        initBC6HProfile(&settings, spec.level);
-                        CompressBlocksBC6H(&surface, dst->pixels, &settings);
-                    }
+                  }
+                  case DXGI_FORMAT_BC6H_UF16: {
+                    bc6h_enc_settings settings;
+                    initBC6HProfile(&settings, spec.level);
+                    CompressBlocksBC6H(&surface, dst->pixels, &settings);
                     break;
-                case DXGI_FORMAT_BC7_UNORM:
-                    {
-                        bc7_enc_settings settings;
-                        initBC7Profile(&settings, spec.level, spec.forceRgbSpecified);
-                        CompressBlocksBC7(&surface, dst->pixels, &settings);
-                    }
+                  }
+                  case DXGI_FORMAT_BC7_UNORM: {
+                    bc7_enc_settings settings;
+                    initBC7Profile(&settings, spec.level, spec.forceRgbSpecified);
+                    CompressBlocksBC7(&surface, dst->pixels, &settings);
                     break;
+                  }
                 }
             }
         }
